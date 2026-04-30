@@ -106,6 +106,29 @@ We are not affiliated with HBO. See below.
 
 ---
 
+## What we know about the cohort
+
+Russ Hanneman did 36 ICOs. One worked. We know the historic survival rate for
+launches like this — most memecoins die, most ICOs die, and most "real
+projects with a token attached" die when the token's drama eats the project.
+
+We are launching anyway, because the protocol is real whether or not the coin
+survives. The protocol on GitHub outlives the meme on pump.fun. That's the
+architecture, not the hope.
+
+If you are buying $PIPER thinking it is the protocol, please re-read this
+file. The token is a meme that funds the developer. The protocol is what's
+in `cli/`, `spec/`, and `compression/`. They are different products, and they
+will sometimes diverge. Hold each on its own merits, or don't hold either.
+
+> *"All the coin from the ICO that worked was on a USB thumb drive — and my
+> dumb fucking housekeeper threw out my jeans."*
+> — Russ Hanneman, S5
+
+We built the protocol so the coin doesn't have to be on a thumb drive.
+
+---
+
 ## We are not affiliated with HBO
 
 Pipernet is not a product of HBO, Home Box Office, Inc., or Warner Bros.
