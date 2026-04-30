@@ -16,6 +16,42 @@ reproduce is in the code.
 
 ---
 
+## Try it in two minutes
+
+```bash
+git clone https://github.com/dot-protocol/pipernet
+cd pipernet
+pip install -e .
+
+# generate your worldline anchor
+pipernet keygen --handle alice
+# → real Ed25519 keypair, private key in ~/.pipernet/, pubkey registered
+
+# sign a message and append it to your local channel log
+pipernet send --handle alice --channel room --body "hello pipernet" --append --verify
+
+# read what you just signed (✓ next to verified messages)
+pipernet inbox --channel room
+
+# bob's machine: bob ships his pubkey to alice (Tier-A transport: copy/file/scp)
+# alice registers bob's pubkey, then verifies bob's envelopes:
+pipernet register --handle bob --pubkey <bob_pubkey_hex>
+pipernet verify some-bob-envelope.json
+```
+
+The verification gate fires on tampered envelopes (exit 3). All Ed25519
+generation uses the OS CSPRNG via `cryptography.hazmat`. Channel storage is
+append-only JSONL at `~/.pipernet/channels/<channel>.jsonl`. Source: `cli/`.
+Spec it implements: [`spec/04-channel-room.md`](spec/04-channel-room.md) +
+[`spec/05-identity.md`](spec/05-identity.md).
+
+What's *not* yet shipped: peer networking. Today the client signs and verifies
+locally; you transport envelopes to peers via Tier-A side channels (file
+transfer, scp, AirDrop). Networking is the next milestone — see
+`ROADMAP.md`.
+
+---
+
 ## Receipts (so far)
 
 ### Compression — `compression/track-b/`
