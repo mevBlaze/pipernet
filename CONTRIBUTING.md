@@ -1,88 +1,121 @@
 # Contributing
 
-We're trying to beat the Hutter Prize. Help.
+There are two tracks. Pick one, or both.
 
-## The One Rule
+**Protocol track** — work on the spec, the CLI, the compression engine,
+or the mesh layer. Lives in `spec/`, `cli/`, `compression/`, `mesh/`.
 
-**Every claim must be reproducible from `make benchmark`.**
-
-No hand-tuned numbers, no "it worked on my machine", no benchmark on a different dataset. If the compressed size isn't produced by `benchmarks/run.sh` running on the standard enwik8 file, it doesn't count.
+**Coin discussion** — goes elsewhere. See `<TBD: community channel link>`.
+This repo is not the right place for token-price opinions or pump.fun
+strategy.
 
 ---
 
 ## Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/middle-out
-cd middle-out
+git clone https://github.com/dot-protocol/pipernet
+cd pipernet
 python -m venv venv && source venv/bin/activate
-pip install numpy
+pip install -e .
 ```
 
-Verify the baseline works:
+Verify the CLI works:
 
 ```bash
-python -c "from src.baseline import encode, decode; assert decode(encode(b'hello world')) == b'hello world'; print('ok')"
-```
-
-Run the benchmark:
-
-```bash
-make benchmark          # standard tools only (fast)
-bash benchmarks/run.sh --with-python  # include our Python impl (slow)
+pipernet keygen --handle test
+pipernet send --handle test --channel test --body "hello" --append --verify
+pipernet inbox --channel test
 ```
 
 ---
 
-## How to Submit an Improvement
+## Running tests
 
-1. **Read the roadmap.** Phase 1 before Phase 2. Don't skip ahead without hitting the gate criterion.
+```bash
+# Protocol / CLI tests
+python -m pytest cli/ -v
 
-2. **Run the benchmark before you change anything.** Establish a baseline for your machine.
+# Compression benchmark (downloads enwik8 if not present, ~100 MB)
+python3 compression/track-b/bench.py 100000
 
-3. **Make your change in `src/`.** The encoder/decoder interface must stay stable:
-   - `encode(data: bytes) -> bytes`
-   - `decode(data: bytes) -> bytes`
+# Full benchmark suite
+make benchmark
+```
 
-4. **Verify round-trip:**
-   ```bash
-   python3 src/baseline.py    # runs the built-in self-test
-   ```
-
-5. **Run the benchmark again** and record the output.
-
-6. **Open a PR** with:
-   - What you changed (algorithm description, not just code diff)
-   - Benchmark output before and after (copy-paste from terminal, including your machine specs)
-   - Why it works (the theory, not just the numbers)
-   - Prior art citation if applicable
+All tests must pass before opening a PR. Round-trip correctness
+(`decode(encode(x)) == x`) is a hard gate — no exceptions.
 
 ---
 
-## What We're Looking For
+## Filing issues
+
+Use GitHub issues. Label as:
+- `bug` — something broke
+- `question` — you're not sure how something is supposed to work
+- `spec` — a question or gap in the protocol specification
+- `enhancement` — a feature that doesn't exist yet
+
+One issue per thing. Reproducible cases preferred.
+
+---
+
+## Proposing protocol changes
+
+Protocol changes go through `spec/` PRs.
+
+The bar is higher than a normal code PR:
+
+1. Read the existing spec documents first. Understand why the current
+   design is the way it is before proposing to change it.
+2. Open an issue labeled `spec` to discuss the problem before writing
+   the change. The worst outcome is a spec PR that solves a real problem
+   the wrong way.
+3. Protocol PRs need: a problem statement, the proposed change, why the
+   current behavior is inadequate, and what breaks if you change it.
+4. Reference implementations are welcome alongside spec changes, but the
+   spec text is the authoritative change — the code follows.
+
+---
+
+## Commit message conventions
+
+Imperative mood. Short subject line (under 72 characters). That's it.
+
+Good: `add order-6 Markov context to compression baseline`
+Good: `fix Ed25519 verify to reject tampered payload field`
+Fine: `update ROADMAP phase 1 status`
+Skip: `WIP`, `fix stuff`, `changes`
+
+No ticket numbers required. No heavy-handed scope prefixes required.
+If the commit is self-explanatory from the subject line, that's enough.
+
+---
+
+## Code style
+
+- Python: `black` for formatting, no other strong opinions.
+- JavaScript/TypeScript: `prettier` for formatting, no other strong
+  opinions.
+- Readability over cleverness — this is protocol-adjacent code, people
+  will be reading it to understand the spec.
+- Self-tests in new modules. If you add a new model or a new CLI
+  command, add something runnable under `if __name__ == "__main__":` or
+  a pytest file.
+
+---
+
+## What we're looking for
 
 Good PRs:
-- Implement PPM escape (Phase 1 gate)
-- Add a second-order context mixer (Phase 2)
-- Reduce memory usage for high-order contexts
-- Port hot loops to numpy or Cython with benchmarked speedup
+- Improve compression ratio with a benchmark before/after
+- Implement a spec section that's currently designed but not coded
 - Fix a correctness bug with a regression test
+- Add a missing spec clarification with a concrete example
+- Improve error messages in the CLI
 
-Out of scope for now:
-- Changing the public `encode`/`decode` interface (breaking change)
-- Swapping the backend language without a design discussion
-- Neural models before Phase 2 is complete (we need the context-mixing baseline first)
-
----
-
-## Code Style
-
-- **Readability over cleverness.** This is research code. Comments explaining *why* are more important than comments explaining *what*.
-- **No external ML deps in Phase 0–2.** stdlib + numpy only. Phase 3 will add a small ML framework; that's a separate discussion.
-- **Self-tests in new modules.** If you add a new model, add `if __name__ == "__main__":` tests that run in < 5 seconds.
-
----
-
-## Questions
-
-Open an issue. Label it `question`. We'll answer.
+Out of scope:
+- Changing the `encode`/`decode` interface without a design issue first
+- Swapping backend language without a design discussion
+- Anything that requires a centralized server to work
+- Token/coin mechanics — that's not in this repo

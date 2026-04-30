@@ -58,8 +58,16 @@ def cmd_send(args: argparse.Namespace) -> int:
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
-    src = sys.stdin.read() if args.envelope == "-" else Path(args.envelope).read_text()
-    envelope = json.loads(src)
+    try:
+        src = sys.stdin.read() if args.envelope == "-" else Path(args.envelope).read_text()
+    except FileNotFoundError:
+        print(f"error: file not found: {args.envelope}", file=sys.stderr)
+        return 1
+    try:
+        envelope = json.loads(src)
+    except json.JSONDecodeError as e:
+        print(f"error: not valid JSON: {e}", file=sys.stderr)
+        return 1
     verdict = core.verify_envelope(envelope)
     print(json.dumps(verdict, indent=2))
     return 0 if verdict["valid"] else 3

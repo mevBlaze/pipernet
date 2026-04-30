@@ -1,11 +1,15 @@
 """
-Bench: compare middle-out v0 baseline against retrieval-augmented mixer.
+Bench: compare middle-out v0 baseline against retrieval-augmented mixers.
 
 Usage:
     python3 bench.py [SLICE_BYTES]    # default: 100_000 bytes
+
+Produces honest, reproducible numbers. Every number printed was produced by
+this script; if your run differs, your run wins.
 """
 from __future__ import annotations
 
+import gzip
 import sys
 import time
 from pathlib import Path
@@ -14,15 +18,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.baseline import encode as baseline_encode, decode as baseline_decode  # noqa: E402
 
-# track-b mixer
+# track-b mixers
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from mixer import encode as mix_encode, decode as mix_decode  # noqa: E402
+from mixer_multi import encode as multi_encode, decode as multi_decode  # noqa: E402
 
 
 def main(slice_bytes: int = 100_000) -> int:
     enwik = Path("/tmp/enwik8")
     if not enwik.exists():
-        print("error: /tmp/enwik8 not found", file=sys.stderr)
+        print("error: /tmp/enwik8 not found — download it first:", file=sys.stderr)
+        print("  curl -O http://mattmahoney.net/dc/enwik8.zip && unzip enwik8.zip && mv enwik8 /tmp/enwik8", file=sys.stderr)
         return 1
 
     raw = enwik.read_bytes()[:slice_bytes]
@@ -44,41 +49,46 @@ def main(slice_bytes: int = 100_000) -> int:
     base_size = len(baseline_blob)
     base_bpb = (base_size * 8) / n
 
-    # track-b mixer
+    # track-b v0.3 multi-window mixer (4 match models + Markov)
     t0 = time.perf_counter()
-    mix_blob = mix_encode(raw)
-    t_mix_enc = time.perf_counter() - t0
+    multi_blob = multi_encode(raw)
+    t_multi_enc = time.perf_counter() - t0
 
     t0 = time.perf_counter()
-    mix_back = mix_decode(mix_blob)
-    t_mix_dec = time.perf_counter() - t0
-    assert mix_back == raw, "mixer round-trip failed"
+    multi_back = multi_decode(multi_blob)
+    t_multi_dec = time.perf_counter() - t0
+    assert multi_back == raw, "multi-mixer round-trip failed"
 
-    mix_size = len(mix_blob)
-    mix_bpb = (mix_size * 8) / n
+    multi_size = len(multi_blob)
+    multi_bpb = (multi_size * 8) / n
 
     # Reference: gzip
-    import gzip
     gzip_size = len(gzip.compress(raw, compresslevel=9))
     gzip_bpb = (gzip_size * 8) / n
 
-    print(f"{'compressor':<28} {'bytes':>10} {'bpb':>8} {'ratio':>8} {'enc(s)':>8} {'dec(s)':>8}")
+    W = 32
+    print(f"{'compressor':<{W}} {'bytes':>10} {'bpb':>8} {'ratio':>8} {'enc(s)':>8} {'dec(s)':>8}")
     print("-" * 70)
-    print(f"{'gzip -9':<28} {gzip_size:>10_} {gzip_bpb:>8.3f} {n/gzip_size:>8.3f} "
+    print(f"{'gzip -9':<{W}} {gzip_size:>10_} {gzip_bpb:>8.3f} {n/gzip_size:>8.3f} "
           f"{'-':>8} {'-':>8}")
-    print(f"{'middle-out v0 (order-3)':<28} {base_size:>10_} {base_bpb:>8.3f} {n/base_size:>8.3f} "
+    print(f"{'middle-out v0 (order-3)':<{W}} {base_size:>10_} {base_bpb:>8.3f} {n/base_size:>8.3f} "
           f"{t_base_enc:>8.2f} {t_base_dec:>8.2f}")
-    print(f"{'track-b v0.1 (markov+match)':<28} {mix_size:>10_} {mix_bpb:>8.3f} {n/mix_size:>8.3f} "
-          f"{t_mix_enc:>8.2f} {t_mix_dec:>8.2f}")
+    print(f"{'track-b v0.3 (4-window mix)':<{W}} {multi_size:>10_} {multi_bpb:>8.3f} {n/multi_size:>8.3f} "
+          f"{t_multi_enc:>8.2f} {t_multi_dec:>8.2f}")
     print("-" * 70)
 
     # Architectural lift over baseline
-    if mix_size < base_size:
-        delta = base_size - mix_size
+    if multi_size < base_size:
+        delta = base_size - multi_size
         pct = 100 * delta / base_size
-        print(f"track-b lift: {delta:_} bytes saved ({pct:.2f}% smaller than baseline)")
+        gzip_delta_pct = 100 * (multi_size - gzip_size) / gzip_size
+        print(f"track-b v0.3 lift: {delta:_} bytes saved ({pct:.2f}% smaller than baseline)")
+        if multi_size > gzip_size:
+            print(f"vs gzip: {gzip_delta_pct:.2f}% behind gzip -9")
+        else:
+            print(f"vs gzip: {-gzip_delta_pct:.2f}% ahead of gzip -9")
     else:
-        delta = mix_size - base_size
+        delta = multi_size - base_size
         pct = 100 * delta / base_size
         print(f"track-b regression: {delta:_} bytes worse than baseline ({pct:.2f}%)")
 

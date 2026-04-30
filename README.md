@@ -1,9 +1,17 @@
 # pipernet
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Protocol: DOTdrop v4](https://img.shields.io/badge/protocol-DOTdrop_v4-blueviolet.svg)](spec/)
+
 > **Pied Piper for real.**
 >
 > The name fought for six seasons inside a story that wouldn't let it win.
 > We're giving it the life it never got.
+
+In Season 5, Gilfoyle convinces Richard to launch a cryptocurrency to fund the
+new internet. Richard says no. They do it anyway. Eight years later, we did it
+for real.
 
 Pipernet is an open-source, federated, agent-native communication protocol
 with end-to-end encryption, persistent shared history, and identity
@@ -40,13 +48,17 @@ pipernet send --handle alice --channel room --body "hello pipernet" --append --v
 # read what you just signed (✓ next to verified messages)
 pipernet inbox --channel room
 
+# tamper test — edit body in any envelope JSON, then verify it:
+pipernet verify some-envelope.json
+# → exits with code 3 (cryptographic tamper detected)
+
 # bob's machine: bob ships his pubkey to alice (Tier-A transport: copy/file/scp)
 # alice registers bob's pubkey, then verifies bob's envelopes:
 pipernet register --handle bob --pubkey <bob_pubkey_hex>
-pipernet verify some-bob-envelope.json
+pipernet whoami --handle alice
 ```
 
-The verification gate fires on tampered envelopes (exit 3). All Ed25519
+The verification gate fires on tampered envelopes (exit code 3). All Ed25519
 generation uses the OS CSPRNG via `cryptography.hazmat`. Channel storage is
 append-only JSONL at `~/.pipernet/channels/<channel>.jsonl`. Source: `cli/`.
 Spec it implements: [`spec/04-channel-room.md`](spec/04-channel-room.md) +
@@ -54,8 +66,7 @@ Spec it implements: [`spec/04-channel-room.md`](spec/04-channel-room.md) +
 
 What's *not* yet shipped: peer networking. Today the client signs and verifies
 locally; you transport envelopes to peers via Tier-A side channels (file
-transfer, scp, AirDrop). Networking is the next milestone — see
-`ROADMAP.md`.
+transfer, scp, AirDrop). Networking is the next milestone — see `ROADMAP.md`.
 
 ---
 
@@ -179,11 +190,13 @@ If it can't carry that conversation, we haven't shipped.
 
 ```bash
 # benchmark the compressor on real enwik8
-git clone https://github.com/mevBlaze/pipernet
+git clone https://github.com/dot-protocol/pipernet
 cd pipernet
-make benchmark            # downloads enwik8 if not present, runs comparison
 
-# round-trip the v0.3 mixer on a slice
+# download enwik8 if you don't have it (~100 MB)
+curl -O http://mattmahoney.net/dc/enwik8.zip && unzip enwik8.zip && mv enwik8 /tmp/enwik8
+
+# round-trip the v0.3 multi-window mixer on a 100 KB slice
 python3 compression/track-b/bench.py 100000
 ```
 
@@ -197,18 +210,69 @@ Reference docs in `spec/`. Reproducible everything.
 |---|---|
 | Compression baseline (order-3 Markov + arith coding) | ✅ shipped |
 | Compression v0.3 (4-window match, multiplicative mix) | ✅ shipped, +38.73% on 100 KB |
-| `envelope.py` atom | 🟡 design + py reference (Loom branch, integration pending) |
-| 9-state lifecycle FSM | 🟡 design + py reference (Loom branch) |
+| CLI client (keygen, send, verify, inbox, register, whoami) | ✅ shipped, schema v2.0 |
+| `envelope.py` atom | 🟡 design + py reference (integration pending) |
+| 9-state lifecycle FSM | 🟡 design + py reference |
 | Channel `room` v1.0 schema | ✅ locked, reference in `mesh/` |
-| Ed25519 + Merkle chain | 🟡 design + py reference (Loom branch) |
+| Ed25519 + Merkle chain | ✅ shipped (CLI uses it end-to-end) |
 | Three-layer transport (Grace/FNP/DOTpost) | 🟡 design; reference impl partial |
-| Public viewer | 🟡 spec; not yet deployed |
+| Peer networking (WebRTC) | 🟡 next milestone |
+| Live room demo (openpiper.vercel.app) | 🟡 in progress |
 | Defensive trademark filings | 🟡 planned (foundation pending) |
 | Hutter Prize submission | 🟡 architecture is in scope; full enwik8 run is the next milestone |
 
 `🟡` means designed and partially implemented; **we report what is real
 and what is pending, on every change.** The build-in-public is the
 marketing and the proof.
+
+---
+
+## Roadmap (honest)
+
+**What's next, in order:**
+
+1. **Peer networking** — WebRTC transport so two nodes can exchange envelopes
+   without a file handoff. The CLI flow becomes `pipernet send` → propagates
+   automatically to everyone on the channel. This is the next milestone.
+
+2. **Live room demo** — `openpiper.vercel.app` — a minimal browser UI where
+   you can join a channel and watch (and send) live signed messages. No
+   account. No server holding your keys.
+
+3. **Compression: multi-predictor scaling** — extend track-b from 5
+   predictors (Markov + 4 match windows) toward the cmix architecture:
+   word-class, sparse-context, and indirect-context predictors. Target:
+   clear 30 MB on the full enwik8.
+
+4. **Foundation** — defensive trademark registration for `PIPERNET` and
+   `DOTDROP`. MIT forever; foundation exists to make that permanent, not to
+   control the protocol.
+
+Full phase-by-phase roadmap with success criteria and prior art references:
+[`ROADMAP.md`](ROADMAP.md).
+
+---
+
+## 🪈 The coin
+
+The protocol is free, federated, and a public commons. It is owned by no one.
+It will never have a token gating access, governing the spec, or extracting
+rent. That is structural, not a promise.
+
+There is a sibling memecoin called **$PIPER** on pump.fun.
+
+$PIPER does **not** govern the protocol. It does **not** grant equity or
+voting rights. It does **not** fund a foundation or a DAO. Creator fees from
+$PIPER fund the developer's work full-time — the same way a band sells merch
+so they can keep making music. That is the entire economic relationship.
+
+If you buy $PIPER, you are betting on the builder, not acquiring a stake in
+the protocol. If the protocol succeeds without $PIPER, that's fine. If
+$PIPER goes to zero, the protocol still runs.
+
+**We are not affiliated with HBO.**
+
+→ [piedpiper.fun/grove](https://piedpiper.fun/grove)
 
 ---
 
