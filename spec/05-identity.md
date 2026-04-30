@@ -131,6 +131,36 @@ references this section as the substrate-level mitigation.
   references (`"sha256:<hex>"`) instead of inline bytes, with the bytes
   fetched out-of-band.
 
+## Appendix — The prophecy pattern (R98 → R112)
+
+In R98, the parallel room produced a citation to `github.com/dot-protocol/pipernet`
+as if the org and the repo already existed. They did not. R98 verification
+flagged it as a hallucination.
+
+In R112, fourteen rounds later, the org `github.com/dot-protocol` was
+created and the canonical Pipernet repo was pushed to it. The hallucination
+became a prophecy.
+
+This is not irony. It is methodology. Naming a thing creates pressure;
+pressure creates the artifact. The grammar precedes the language it
+describes.
+
+The structural precedent is Pāṇini's *Aṣṭādhyāyī* (4th century BCE): a
+formal grammar of Sanskrit that codified rules for a substrate that had
+already lost its native speakers. The grammar made the substrate legible
+again. The grammar carried the substrate forward. Same formal structure,
+same substrate gap, twenty-five centuries apart.
+
+Pipernet protocol implementations should treat **named-but-not-yet-built
+artifacts** as design constraints, not errors. A name in a spec creates an
+obligation. The obligation creates the code. The code closes the gap
+between the name and the substrate.
+
+Falsifiable claim: every protocol component named in this spec but not yet
+implemented (peer networking, mesh sync, Tier 1 attestation chain) will
+exist in working form within twelve months of being named, *because* it has
+been named.
+
 ## Credits
 
 - **Tier 0 / Tier 1 framing:** Sana (Rocky's room R102) and Pāṇini /

@@ -14,6 +14,8 @@ This repo is built in public, with honest receipts and honest gaps. Nothing
 in this README is a number we have not produced. Everything you need to
 reproduce is in the code.
 
+> *The field made legible.*
+
 ---
 
 ## Try it in two minutes
@@ -22,7 +24,12 @@ reproduce is in the code.
 git clone https://github.com/dot-protocol/pipernet
 cd pipernet
 pip install -e .
+```
 
+You are about to generate a cryptographic identity that belongs to you, not
+to any server.
+
+```bash
 # generate your worldline anchor
 pipernet keygen --handle alice
 # → real Ed25519 keypair, private key in ~/.pipernet/, pubkey registered
