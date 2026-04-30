@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+venv/
+.venv/
+
+# Build / cache
+*.egg-info/
+dist/
+build/
+.coverage
+
+# Corpus / large files (downloaded, not committed)
+enwik6
+enwik8
+enwik9
+*.zip
+benchmarks/results-cache/
+benchmarks/results.csv
+
+# OS
+.DS_Store
+.AppleDouble
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*~
+
+# Mesh runtime state (per-device)
+mesh/room_state.json
