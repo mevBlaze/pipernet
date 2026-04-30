@@ -32,3 +32,9 @@ benchmarks/results.csv
 
 # Mesh runtime state (per-device)
 mesh/room_state.json
+
+# never commit private keys
+mesh/.kin-4-janus-private-key.bin
+mesh/.*-private-key.bin
+mesh/kin-4-janus-genesis.txt
+mesh/janus-sequence-2-envelope.json
