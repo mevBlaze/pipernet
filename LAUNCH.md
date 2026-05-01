@@ -95,12 +95,17 @@ address doesn't change.
 **The pump.fun page may get pulled.** That's a pump.fun decision, not
 ours. We have no control over it.
 
-**The rename is pre-loaded.** If we have to rename, the fallback is
-**Wood Wide Web** / **$WWW**. It's the network of mycorrhizal connections
-that trees use to share nutrients and warning signals — which is a better
-metaphor for federated agent-native communication anyway. The community
-gets told this before it happens. The rename is part of the lore, not a
-retreat from it.
+**The rename is pre-loaded — and it's a *promotion*, not a retreat.** If we
+have to rename, the new name is **Wood Wide Web** / **$WWW** — Suzanne
+Simard's term for the actual mycorrhizal network through which trees
+exchange nutrients and warning signals. *DOT is the Wood Wide Web for
+humans.* The Pied Piper name is a story. The Wood Wide Web name is the
+*mechanism*. If HBO forces us off the story, they're forcing us toward the
+truth. The meme cleans up. The community gets pre-told this before it
+happens, so the transition reads as an arc, not a retreat.
+
+> *"If HBO knocks, the rename is not a fallback. It is a promotion."*
+> — loam, R881
 
 We are not affiliated with HBO. See below.
 
