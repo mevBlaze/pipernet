@@ -2,7 +2,7 @@
 pipernet relay server — cli/server.py
 
 Run with:
-    pipernet serve --port 8000 --host 0.0.0.0
+    pipernet serve --port 8000 --host 0.0.0.0 --log-level info
 
 Endpoints:
     POST /channels/<name>           — submit a signed envelope
@@ -17,12 +17,21 @@ Endpoints:
 
 No auth in v0. Signatures are the auth.
 CORS: Access-Control-Allow-Origin: * on all GETs.
+
+Structured logging:
+    Every log line is JSON: {"ts": ISO, "level": "info", "event": "<name>", ...context}
+    Set log level with --log-level flag (debug|info|warn|error).
+    All output goes to stdout for systemd/pm2 capture.
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import sys
 import time
+import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 try:
@@ -36,6 +45,70 @@ except ImportError:
 from . import core
 
 VERSION = "0.2.0"
+
+
+# ---------------------------------------------------------------------------
+# Structured JSON logger
+# ---------------------------------------------------------------------------
+
+class _JsonFormatter(logging.Formatter):
+    """Emit each log record as a single JSON line on stdout."""
+
+    LEVEL_MAP = {
+        logging.DEBUG: "debug",
+        logging.INFO: "info",
+        logging.WARNING: "warn",
+        logging.ERROR: "error",
+        logging.CRITICAL: "error",
+    }
+
+    def format(self, record: logging.LogRecord) -> str:
+        # event key comes from the message itself OR from extra["event"]
+        event_name = getattr(record, "event", record.getMessage())
+        data: dict[str, Any] = {
+            "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+            "level": self.LEVEL_MAP.get(record.levelno, "info"),
+            "event": event_name,
+        }
+        # Merge any extra context attached via logger.info("msg", extra={...})
+        skip = {
+            "name", "msg", "args", "levelname", "levelno", "pathname",
+            "filename", "module", "exc_info", "exc_text", "stack_info",
+            "lineno", "funcName", "created", "msecs", "relativeCreated",
+            "thread", "threadName", "processName", "process", "message",
+            "taskName", "event",  # already captured above
+        }
+        for key, value in record.__dict__.items():
+            if key.startswith("_") or key in skip:
+                continue
+            data[key] = value
+        return json.dumps(data, separators=(",", ":"), default=str)
+
+
+def setup_logging(level_name: str = "info") -> logging.Logger:
+    """Configure pipernet logger to emit JSON lines to stdout."""
+    level_map = {
+        "debug": logging.DEBUG,
+        "info": logging.INFO,
+        "warn": logging.WARNING,
+        "warning": logging.WARNING,
+        "error": logging.ERROR,
+    }
+    level = level_map.get(level_name.lower(), logging.INFO)
+
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(_JsonFormatter())
+
+    logger = logging.getLogger("pipernet")
+    logger.setLevel(level)
+    logger.handlers.clear()
+    logger.addHandler(handler)
+    logger.propagate = False
+    return logger
+
+
+# Module-level logger used throughout this file
+log = logging.getLogger("pipernet")
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +137,15 @@ async def _broadcast(channel: str, envelope: dict) -> None:
             _get_subs(channel).remove(q)
         except ValueError:
             pass
+    if dead:
+        log.warning(
+            "sse.slow_client_dropped",
+            extra={
+                "event": "sse.slow_client_dropped",
+                "channel": channel,
+                "dropped": len(dead),
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +169,21 @@ def _json_response(data: Any, status: int = 200) -> web.Response:
     )
 
 
+def _request_id(request: web.Request) -> str:
+    """Return the UUID attached by request_id_middleware."""
+    return request.get("_request_id", str(uuid.uuid4()))
+
+
+# ---------------------------------------------------------------------------
+# Request ID middleware
+# ---------------------------------------------------------------------------
+
+@web.middleware
+async def request_id_middleware(request: web.Request, handler):
+    request["_request_id"] = str(uuid.uuid4())
+    return await handler(request)
+
+
 # ---------------------------------------------------------------------------
 # Handlers
 # ---------------------------------------------------------------------------
@@ -106,7 +203,7 @@ POST /pubkeys                      Register a peer: {{handle, pubkey_hex, identi
 POST /gossip                       Relay-to-relay: submit a batch of signed envelopes
 GET  /health                       Node health + stats
 
-CURL QUICKSTART (alice → relay → bob)
+CURL QUICKSTART (alice -> relay -> bob)
 --------------------------------------
 # alice generates a keypair and sends to relay:
 pipernet keygen --handle alice
@@ -120,7 +217,7 @@ curl http://localhost:8000/channels/test
 # bob subscribes to live events (SSE):
 curl -N http://localhost:8000/channels/test/events
 
-# alice posts another message — bob sees it arrive instantly.
+# alice posts another message -- bob sees it arrive instantly.
 """
     return web.Response(text=text, content_type="text/plain", headers=_cors_headers())
 
@@ -128,18 +225,48 @@ curl -N http://localhost:8000/channels/test/events
 async def handle_post_channel(request: web.Request) -> web.Response:
     """Receive a signed envelope, validate, append, broadcast."""
     channel = request.match_info["name"]
+    rid = _request_id(request)
+
     try:
         body = await request.json()
     except json.JSONDecodeError as e:
+        log.warning(
+            "envelope.rejected",
+            extra={
+                "event": "envelope.rejected",
+                "request_id": rid,
+                "channel": channel,
+                "reason": f"invalid JSON: {e}",
+            },
+        )
         return _json_response({"error": f"invalid JSON: {e}"}, 400)
 
     if not isinstance(body, dict):
+        log.warning(
+            "envelope.rejected",
+            extra={
+                "event": "envelope.rejected",
+                "request_id": rid,
+                "channel": channel,
+                "reason": "body must be JSON object",
+            },
+        )
         return _json_response({"error": "envelope must be a JSON object"}, 400)
 
     # Load registry — relay has all registered pubkeys
     registry = core.load_pubkey_registry()
     verdict = core.verify_envelope(body, registry=registry)
     if not verdict["valid"]:
+        log.warning(
+            "envelope.rejected",
+            extra={
+                "event": "envelope.rejected",
+                "request_id": rid,
+                "channel": channel,
+                "from": body.get("from"),
+                "reason": verdict["reason"],
+            },
+        )
         return _json_response(
             {"error": "signature does not verify", "reason": verdict["reason"]},
             400,
@@ -147,6 +274,16 @@ async def handle_post_channel(request: web.Request) -> web.Response:
 
     # Append to channel
     core.append_to_channel(channel, body)
+    log.info(
+        "envelope.appended",
+        extra={
+            "event": "envelope.appended",
+            "request_id": rid,
+            "channel": channel,
+            "from": body.get("from"),
+            "sequence": body.get("sequence"),
+        },
+    )
 
     # Broadcast to SSE subscribers
     await _broadcast(channel, body)
@@ -176,6 +313,8 @@ async def handle_get_channel(request: web.Request) -> web.Response:
 async def handle_sse_channel(request: web.Request) -> web.StreamResponse:
     """Server-Sent Events stream for a channel."""
     channel = request.match_info["name"]
+    rid = _request_id(request)
+    remote = request.remote or "unknown"
 
     response = web.StreamResponse()
     response.headers["Content-Type"] = "text/event-stream"
@@ -187,6 +326,17 @@ async def handle_sse_channel(request: web.Request) -> web.StreamResponse:
 
     queue: asyncio.Queue = asyncio.Queue(maxsize=200)
     _get_subs(channel).append(queue)
+
+    log.info(
+        "sse.connect",
+        extra={
+            "event": "sse.connect",
+            "request_id": rid,
+            "channel": channel,
+            "remote": remote,
+            "subscribers": len(_get_subs(channel)),
+        },
+    )
 
     # Send connected event
     await response.write(
@@ -210,6 +360,16 @@ async def handle_sse_channel(request: web.Request) -> web.StreamResponse:
             _get_subs(channel).remove(queue)
         except ValueError:
             pass
+        log.info(
+            "sse.disconnect",
+            extra={
+                "event": "sse.disconnect",
+                "request_id": rid,
+                "channel": channel,
+                "remote": remote,
+                "subscribers": len(_get_subs(channel)),
+            },
+        )
 
     return response
 
@@ -227,6 +387,8 @@ async def handle_post_pubkeys(request: web.Request) -> web.Response:
     identity_assertion is the dict returned by `pipernet keygen`.
     We verify the self_signature_hex to confirm handle owns the key.
     """
+    rid = _request_id(request)
+
     try:
         body = await request.json()
     except json.JSONDecodeError as e:
@@ -253,7 +415,6 @@ async def handle_post_pubkeys(request: web.Request) -> web.Response:
     if identity_assertion:
         try:
             from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-            import base64
 
             ia = dict(identity_assertion)
             sig_hex = ia.pop("self_signature_hex", None)
@@ -264,11 +425,28 @@ async def handle_post_pubkeys(request: web.Request) -> web.Response:
             pk = Ed25519PublicKey.from_public_bytes(bytes.fromhex(pubkey_hex))
             pk.verify(bytes.fromhex(sig_hex), core.canonical(ia))
         except Exception as e:
+            log.warning(
+                "pubkey.rejected",
+                extra={
+                    "event": "pubkey.rejected",
+                    "request_id": rid,
+                    "handle": handle,
+                    "reason": str(e),
+                },
+            )
             return _json_response(
                 {"error": f"identity assertion signature does not verify: {e}"}, 400
             )
 
     core.register_pubkey(handle, pubkey_hex)
+    log.info(
+        "pubkey.registered",
+        extra={
+            "event": "pubkey.registered",
+            "request_id": rid,
+            "handle": handle,
+        },
+    )
     return _json_response({"registered": handle, "pubkey_hex": pubkey_hex})
 
 
@@ -279,6 +457,8 @@ async def handle_gossip(request: web.Request) -> web.Response:
     Validates each, deduplicates by signature, appends new ones.
     Returns {appended: N, rejected: [...]}
     """
+    rid = _request_id(request)
+
     try:
         batch = await request.json()
     except json.JSONDecodeError as e:
@@ -313,6 +493,15 @@ async def handle_gossip(request: web.Request) -> web.Response:
         await _broadcast(channel, envelope)
         appended += 1
 
+    log.info(
+        "gossip.received",
+        extra={
+            "event": "gossip.received",
+            "request_id": rid,
+            "appended": appended,
+            "rejected": len(rejected),
+        },
+    )
     return _json_response({"appended": appended, "rejected": rejected})
 
 
@@ -363,7 +552,7 @@ def build_app(node_handle: str | None = None) -> web.Application:
         reg = core.load_pubkey_registry()
         node_handle = next(iter(reg), "anonymous")
 
-    app = web.Application()
+    app = web.Application(middlewares=[request_id_middleware])
     app["start_time"] = time.time()
     app["node_handle"] = node_handle
 
@@ -382,22 +571,33 @@ def build_app(node_handle: str | None = None) -> web.Application:
     return app
 
 
-def run_server(host: str = "0.0.0.0", port: int = 8000, node_handle: str | None = None) -> None:
+def run_server(
+    host: str = "0.0.0.0",
+    port: int = 8000,
+    node_handle: str | None = None,
+    log_level: str = "info",
+) -> None:
     """Start the relay server. Blocks until Ctrl+C."""
+    setup_logging(log_level)
     app = build_app(node_handle=node_handle)
-    print(f"pipernet relay v{VERSION}")
-    print(f"node:    {app['node_handle']}")
-    print(f"storage: {core.home()}")
-    print(f"listen:  http://{host}:{port}")
-    print(f"")
-    print(f"Endpoints:")
-    print(f"  POST http://{host}:{port}/channels/<name>        submit envelope")
-    print(f"  GET  http://{host}:{port}/channels/<name>        read channel")
-    print(f"  GET  http://{host}:{port}/channels/<name>/events SSE stream")
-    print(f"  GET  http://{host}:{port}/pubkeys                peer registry")
-    print(f"  POST http://{host}:{port}/pubkeys                register peer")
-    print(f"  POST http://{host}:{port}/gossip                 relay sync")
-    print(f"  GET  http://{host}:{port}/health                 health check")
-    print(f"")
-    print(f"Press Ctrl+C to stop.")
-    web.run_app(app, host=host, port=port, print=None)
+
+    log.info(
+        "relay.start",
+        extra={
+            "event": "relay.start",
+            "version": VERSION,
+            "node": app["node_handle"],
+            "host": host,
+            "port": port,
+            "storage": str(core.home()),
+            "log_level": log_level,
+        },
+    )
+
+    try:
+        web.run_app(app, host=host, port=port, print=None)
+    finally:
+        log.info(
+            "relay.stop",
+            extra={"event": "relay.stop", "node": app["node_handle"]},
+        )

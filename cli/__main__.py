@@ -176,7 +176,7 @@ def cmd_dot(args: argparse.Namespace) -> int:
 
 def cmd_serve(args: argparse.Namespace) -> int:
     from .server import run_server
-    run_server(host=args.host, port=args.port, node_handle=args.node)
+    run_server(host=args.host, port=args.port, node_handle=args.node, log_level=args.log_level)
     return 0
 
 
@@ -256,6 +256,9 @@ def main(argv: list[str] | None = None) -> int:
     p_serve.add_argument("--host", default="0.0.0.0", help="bind host (default: 0.0.0.0)")
     p_serve.add_argument("--port", type=int, default=8000, help="bind port (default: 8000)")
     p_serve.add_argument("--node", default=None, help="node handle to advertise (default: first registered key)")
+    p_serve.add_argument("--log-level", default="info",
+                         choices=["debug", "info", "warn", "warning", "error"],
+                         help="log verbosity level (default: info)")
     p_serve.set_defaults(func=cmd_serve)
 
     # dot — identity logogram (QR-based circular badge)
