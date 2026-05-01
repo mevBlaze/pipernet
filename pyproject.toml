@@ -27,7 +27,9 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://piedpiper.fun"
-Repository = "https://github.com/mevBlaze/pipernet"
+Repository = "https://github.com/dot-protocol/pipernet"
+Issues = "https://github.com/dot-protocol/pipernet/issues"
+Discussions = "https://github.com/dot-protocol/pipernet/discussions"
 
 [project.scripts]
 pipernet = "cli.__main__:main"

@@ -2,16 +2,18 @@
 
 ## Reporting a vulnerability
 
-Email: `<TBD: security@piedpiper.fun>`
+**Primary channel — GitHub Security Advisories.**
+[github.com/dot-protocol/pipernet/security/advisories/new](https://github.com/dot-protocol/pipernet/security/advisories/new)
 
-This address is not yet active. Until it is, open a GitHub Security
-Advisory (the "Report a vulnerability" button on the Security tab).
-Setting up the security@ address is a tracked TODO — if you're reading
-this and it's been more than 30 days since the repo launched, feel free
-to file a regular issue pointing at this gap.
+This is the recommended path. Reports stay private between you, the
+maintainers, and any collaborators we explicitly add. GitHub will assign a
+CVE if applicable. We monitor this channel and acknowledge within 72 hours.
 
-Please do not open public issues for security vulnerabilities. Give us a
-chance to fix it before the details are public.
+**Backup channel — direct email.**
+A dedicated `security@piedpiper.fun` mailbox is being set up. Until that
+lands, the GitHub Security Advisory flow above is the supported way to
+reach us. Do not file public GitHub issues for security findings — give us
+a chance to fix before the details are public.
 
 ---
 
