@@ -5,7 +5,7 @@ There are two tracks. Pick one, or both.
 **Protocol track** — work on the spec, the CLI, the compression engine,
 or the mesh layer. Lives in `spec/`, `cli/`, `compression/`, `mesh/`.
 
-**Coin discussion** — goes elsewhere. See `<TBD: community channel link>`.
+**Coin discussion** — goes elsewhere. See [GitHub Discussions](https://github.com/dot-protocol/pipernet/discussions) for protocol questions and roadmap conversations. Coin-specific chatter (price, charts, memes) belongs on [piedpiper.fun/grove](https://piedpiper.fun/grove) and the project's social channels — *not* in this repo's issue tracker.
 This repo is not the right place for token-price opinions or pump.fun
 strategy.
 
