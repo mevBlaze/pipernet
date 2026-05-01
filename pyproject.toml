@@ -15,6 +15,13 @@ dependencies = [
     "aiohttp>=3.9",
 ]
 keywords = ["compression", "ed25519", "federated", "agent", "protocol", "pipernet"]
+
+[project.optional-dependencies]
+dot = [
+    "qrcode[pil]>=7.0",
+    "Pillow>=10.0",
+    "pyzbar>=0.1.9",
+]
 classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",

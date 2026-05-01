@@ -66,6 +66,40 @@ Spec it implements: [`spec/04-channel-room.md`](spec/04-channel-room.md) +
 
 ---
 
+## Generate your dot
+
+Every handle gets a `.dot.png` — a 400×400 circular image that is simultaneously
+a scannable QR code and a Pipernet identity card. Your public key, your handle,
+and an Ed25519 self-signature, all in one image.
+
+```bash
+# Install dot dependencies first:
+pip install -e ".[dot]"
+# On macOS also: brew install zbar
+
+# Generate your dot (saves to ~/.pipernet/dots/alice.dot.png):
+pipernet dot create --handle alice
+
+# Or to a specific path:
+pipernet dot create --handle alice --out /tmp/alice.dot.png
+
+# Scan and verify a dot:
+pipernet dot scan /tmp/alice.dot.png
+# → exit 0 if signature verifies, exit 3 if tampered/forged
+```
+
+A standard phone camera or `zbarimg` reads the inner QR without any Pipernet
+software. The JSON payload contains the public key and handle — enough to start
+a conversation. A Pipernet client additionally verifies the Ed25519 signature.
+
+**Graceful degradation:** Nokia 3315 reads the QR. A Pipernet-aware agent reads
+the signature. A v0.2 agent (not yet built) reads the 4D outer rings. Same image.
+
+See [`tools/dot/README.md`](tools/dot/README.md) for full documentation and the
+v0.2 ring-extension design.
+
+---
+
 ## Run a relay
 
 One command starts an HTTP relay any node on your LAN can connect to:

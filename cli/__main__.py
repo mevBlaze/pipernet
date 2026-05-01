@@ -9,6 +9,8 @@ Usage:
     pipernet register --handle <name> --pubkey <hex>
     pipernet whoami --handle <name>
     pipernet serve [--host HOST] [--port PORT] [--node HANDLE]
+    pipernet dot create --handle <name> [--out <path>]
+    pipernet dot scan <path-to-dot.png>
 """
 from __future__ import annotations
 
@@ -120,6 +122,58 @@ def cmd_register(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dot(args: argparse.Namespace) -> int:
+    """Dispatch `pipernet dot create` and `pipernet dot scan`."""
+    if args.dot_cmd == "create":
+        from pathlib import Path as _Path
+        import sys as _sys
+        try:
+            # Import relative to repo root — works whether installed or run directly
+            import importlib.util, os as _os
+            _here = _Path(__file__).resolve().parent.parent
+            _spec = importlib.util.spec_from_file_location(
+                "dot_encode",
+                _here / "tools" / "dot" / "encode.py",
+            )
+            _mod = importlib.util.module_from_spec(_spec)
+            _spec.loader.exec_module(_mod)
+        except Exception as e:
+            print(f"error loading tools/dot/encode.py: {e}", file=sys.stderr)
+            return 1
+        try:
+            out = _mod.generate_dot(args.handle, args.out)
+            print(f"dot created: {out}", file=sys.stderr)
+            import json
+            print(json.dumps({"status": "ok", "path": str(out), "handle": args.handle}, indent=2))
+            return 0
+        except (ValueError, FileNotFoundError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+
+    elif args.dot_cmd == "scan":
+        from pathlib import Path as _Path
+        import importlib.util
+        _here = _Path(__file__).resolve().parent.parent
+        _spec = importlib.util.spec_from_file_location(
+            "dot_decode",
+            _here / "tools" / "dot" / "decode.py",
+        )
+        _mod = importlib.util.module_from_spec(_spec)
+        try:
+            _spec.loader.exec_module(_mod)
+        except Exception as e:
+            print(f"error loading tools/dot/decode.py: {e}", file=sys.stderr)
+            return 1
+        import json
+        code, result = _mod.scan_dot(args.image)
+        print(json.dumps(result, indent=2))
+        return code
+
+    else:
+        print(f"error: unknown dot subcommand '{args.dot_cmd}'", file=sys.stderr)
+        return 1
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     from .server import run_server
     run_server(host=args.host, port=args.port, node_handle=args.node)
@@ -185,6 +239,20 @@ def main(argv: list[str] | None = None) -> int:
     p_serve.add_argument("--port", type=int, default=8000, help="bind port (default: 8000)")
     p_serve.add_argument("--node", default=None, help="node handle to advertise (default: first registered key)")
     p_serve.set_defaults(func=cmd_serve)
+
+    # dot — identity logogram (QR-based circular badge)
+    p_dot = sub.add_parser("dot", help="generate or scan a Pipernet .dot.png identity logogram")
+    dot_sub = p_dot.add_subparsers(dest="dot_cmd", required=True)
+
+    p_dot_create = dot_sub.add_parser("create", help="generate a .dot.png for a handle")
+    p_dot_create.add_argument("--handle", required=True, help="Pipernet handle")
+    p_dot_create.add_argument("--out", default=None, help="output path (default: ~/.pipernet/dots/<handle>.dot.png)")
+    p_dot.set_defaults(func=cmd_dot)
+    p_dot_create.set_defaults(func=cmd_dot)
+
+    p_dot_scan = dot_sub.add_parser("scan", help="scan and verify a .dot.png")
+    p_dot_scan.add_argument("image", help="path to .dot.png file")
+    p_dot_scan.set_defaults(func=cmd_dot)
 
     args = p.parse_args(argv)
     return args.func(args)

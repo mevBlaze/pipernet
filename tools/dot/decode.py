@@ -1,0 +1,209 @@
+"""
+tools/dot/decode.py — Pipernet dot scanner / verifier (v0)
+
+Reads a .dot.png (or any PNG/image with a standard QR inside), decodes
+the QR payload, verifies the Pipernet self-signature, and prints the
+result as JSON.
+
+Usage:
+    python -m tools.dot.decode <path-to-dot.png>
+    # or via CLI:
+    pipernet dot scan <path-to-dot.png>
+
+Exit codes:
+    0  — QR found, signature verified
+    1  — No QR found, malformed image, or missing fields
+    3  — QR found + parsed, but signature verification FAILED
+
+The decoder is intentionally dependency-light: pyzbar for QR reading,
+Pillow for image loading. No custom ring-parsing (that's v0.2 / the 4D
+outer-ring extension).
+"""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+
+# ---- optional deps check -------------------------------------------------
+
+def _require(name: str, pip_extra: str) -> None:
+    import importlib
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        print(
+            f"error: '{name}' is not installed.\n"
+            f"  Install with: pip install -e \".[dot]\"\n"
+            f"  Or directly:  pip install {pip_extra}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+# ---- path helpers --------------------------------------------------------
+
+def _pipernet_home() -> Path:
+    import os
+    base = os.environ.get("PIPERNET_HOME")
+    p = Path(base) if base else Path.home() / ".pipernet"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _load_pubkey_registry() -> dict[str, str]:
+    p = _pipernet_home() / "pubkeys.json"
+    if not p.exists():
+        return {}
+    return json.loads(p.read_text())
+
+
+# ---- signature verification ----------------------------------------------
+
+def _canonical(obj: dict) -> bytes:
+    return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _verify_dot_payload(payload: dict) -> tuple[bool, str]:
+    """
+    Verify the self_signature in a dot payload.
+
+    Returns (valid: bool, reason: str).
+    The reason is None/empty on success and a human-readable error on failure.
+    """
+    required_fields = ("handle", "issued_at", "pubkey_hex", "self_signature", "tier")
+    for f in required_fields:
+        if f not in payload:
+            return False, f"missing field: '{f}'"
+
+    handle = payload["handle"]
+    sig_hex = payload["self_signature"]
+    pubkey_hex = payload["pubkey_hex"]
+
+    # Check against local registry too (if available) — registry pubkey wins on mismatch
+    registry = _load_pubkey_registry()
+    if handle in registry and registry[handle] != pubkey_hex:
+        return False, (
+            f"pubkey in dot ({pubkey_hex[:16]}…) does not match "
+            f"local registry for '{handle}' ({registry[handle][:16]}…)"
+        )
+
+    # Build canonical body (same construction as encode.py)
+    body = {
+        "handle": payload["handle"],
+        "issued_at": payload["issued_at"],
+        "pubkey_hex": payload["pubkey_hex"],
+        "tier": payload["tier"],
+    }
+
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        pk = Ed25519PublicKey.from_public_bytes(bytes.fromhex(pubkey_hex))
+        pk.verify(bytes.fromhex(sig_hex), _canonical(body))
+    except Exception as e:
+        return False, f"signature verification failed: {type(e).__name__}: {e}"
+
+    return True, ""
+
+
+# ---- QR decoding ---------------------------------------------------------
+
+def _decode_qr_from_image(image_path: Path) -> list[str]:
+    """
+    Use pyzbar to decode all QR codes in the image.
+    Returns a list of decoded UTF-8 strings (may be empty).
+    """
+    _require("PIL", "Pillow>=10.0")
+    _require("pyzbar", "pyzbar>=0.1.9")
+
+    from PIL import Image
+    from pyzbar import pyzbar
+
+    img = Image.open(str(image_path)).convert("RGB")
+    decoded = pyzbar.decode(img)
+    results = []
+    for obj in decoded:
+        if obj.type == "QRCODE":
+            try:
+                results.append(obj.data.decode("utf-8"))
+            except UnicodeDecodeError:
+                pass
+    return results
+
+
+# ---- main scan logic -----------------------------------------------------
+
+def scan_dot(image_path: str | Path) -> tuple[int, dict]:
+    """
+    Scan a .dot.png and return (exit_code, result_dict).
+
+    exit_code:
+        0 — verified OK
+        1 — no QR / malformed
+        3 — signature failure
+    """
+    image_path = Path(image_path)
+    if not image_path.exists():
+        return 1, {"error": f"file not found: {image_path}"}
+
+    # 1. Decode QR(s) from image
+    try:
+        raw_payloads = _decode_qr_from_image(image_path)
+    except Exception as e:
+        return 1, {"error": f"image decode failed: {e}"}
+
+    if not raw_payloads:
+        return 1, {
+            "error": "no QR code found in image",
+            "hint": "ensure image is a valid .dot.png generated by pipernet dot create",
+        }
+
+    # 2. Parse the first QR payload as JSON
+    raw = raw_payloads[0]
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as e:
+        return 1, {
+            "error": f"QR data is not valid JSON: {e}",
+            "raw": raw[:200],
+        }
+
+    # 3. Verify the self-signature
+    valid, reason = _verify_dot_payload(payload)
+
+    result = {
+        "verified": valid,
+        "handle": payload.get("handle"),
+        "pubkey_hex": payload.get("pubkey_hex"),
+        "tier": payload.get("tier"),
+        "issued_at": payload.get("issued_at"),
+        "self_signature": payload.get("self_signature", "")[:16] + "…",  # truncate for display
+        "path": str(image_path),
+    }
+
+    if not valid:
+        result["reason"] = reason
+        return 3, result
+
+    return 0, result
+
+
+# ---- CLI entrypoint (standalone) -----------------------------------------
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+    p = argparse.ArgumentParser(
+        prog="dot-decode",
+        description="Scan and verify a Pipernet .dot.png identity logogram",
+    )
+    p.add_argument("image", help="Path to .dot.png file to scan")
+    args = p.parse_args(argv)
+
+    code, result = scan_dot(args.image)
+    print(json.dumps(result, indent=2))
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())
