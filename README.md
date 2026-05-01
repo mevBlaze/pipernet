@@ -96,7 +96,9 @@ a conversation. A Pipernet client additionally verifies the Ed25519 signature.
 the signature. A v0.2 agent (not yet built) reads the 4D outer rings. Same image.
 
 See [`tools/dot/README.md`](tools/dot/README.md) for full documentation and the
-v0.2 ring-extension design.
+v0.1 implementation. The full v0.3 spec (four-dimensional: r/θ/c/d, recursion
+depth, calibration ring, CNN decoder) lives at
+[`spec/10-microdot.md`](spec/10-microdot.md).
 
 ---
 
