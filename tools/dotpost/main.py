@@ -114,7 +114,7 @@ def cmd_send(args: argparse.Namespace) -> int:
                         f"to:{recipient}",
                         "mesh",
                     ],
-                    "confidence": "strong",
+                    "confidence": 0.95,
                 }
             ]
         },

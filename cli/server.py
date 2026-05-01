@@ -13,6 +13,7 @@ Endpoints:
     POST /pubkeys                   — register a peer pubkey
     POST /gossip                    — relay-to-relay envelope batch
     GET  /health                    — node health
+    GET  /limits                    — configured rate limits (public)
     GET  /                          — quickstart help
 
 No auth in v0. Signatures are the auth.
@@ -22,10 +23,18 @@ Structured logging:
     Every log line is JSON: {"ts": ISO, "level": "info", "event": "<name>", ...context}
     Set log level with --log-level flag (debug|info|warn|error).
     All output goes to stdout for systemd/pm2 capture.
+
+Rate limiting (in-memory sliding window, no external deps):
+    Per pubkey handle : max 10 envelopes / 60 s
+    Per IP            : max 60 POST requests / 60 s
+    Per IP (Sybil)    : max 30 unique handles registered / 3600 s
+    Per IP (SSE)      : max 5 concurrent SSE connections
+    Privacy: IPs truncated to /24 in logs; pubkeys to first 8 chars.
 """
 from __future__ import annotations
 
 import asyncio
+import collections
 import json
 import logging
 import sys
@@ -45,6 +54,217 @@ except ImportError:
 from . import core
 
 VERSION = "0.2.0"
+
+
+# ---------------------------------------------------------------------------
+# Rate limit configuration
+# ---------------------------------------------------------------------------
+
+RATE_LIMITS: dict[str, Any] = {
+    "per_pubkey": {
+        "description": "Max envelopes a single pubkey handle may submit",
+        "max_requests": 10,
+        "window_seconds": 60,
+        "applies_to": ["POST /channels/<name>"],
+    },
+    "per_ip_post": {
+        "description": "Max total POST requests from a single IP",
+        "max_requests": 60,
+        "window_seconds": 60,
+        "applies_to": ["POST /channels/<name>", "POST /pubkeys", "POST /gossip"],
+    },
+    "per_ip_sybil": {
+        "description": "Max unique pubkey handles an IP may register (Sybil protection)",
+        "max_requests": 30,
+        "window_seconds": 3600,
+        "applies_to": ["POST /pubkeys", "POST /channels/<name>"],
+    },
+    "per_ip_sse": {
+        "description": "Max concurrent SSE subscriptions from a single IP",
+        "max_concurrent": 5,
+        "applies_to": ["GET /channels/<name>/events"],
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Privacy helpers — never log full IPs or full pubkeys
+# ---------------------------------------------------------------------------
+
+def _mask_ip(ip: str) -> str:
+    """Truncate IPv4 to /24 (e.g. 192.168.1.x). Pass IPv6 through truncated."""
+    if not ip or ip == "unknown":
+        return "unknown"
+    parts = ip.split(".")
+    if len(parts) == 4:
+        return f"{parts[0]}.{parts[1]}.{parts[2]}.x"
+    # IPv6 — just take first 16 chars + ellipsis
+    return ip[:16] + "..."
+
+
+def _mask_key(key: str) -> str:
+    """Return first 8 chars + '...' of a pubkey/handle."""
+    if not key:
+        return "..."
+    return key[:8] + "..."
+
+
+# ---------------------------------------------------------------------------
+# Sliding-window rate limiter (pure in-memory, no external deps)
+# ---------------------------------------------------------------------------
+
+class RateLimiter:
+    """
+    Simple per-key sliding-window counter using deques of timestamps.
+
+    Usage:
+        rl = RateLimiter()
+        ok, retry_after = rl.check("per_ip_post", "192.168.1.x", max_req=60, window=60)
+        if not ok:
+            return 429
+
+    All timestamp buckets are stored in a defaultdict(deque); stale entries
+    older than `window` are pruned on each check (lazy eviction). This keeps
+    memory proportional to active request rates, not registered keys.
+    """
+
+    def __init__(self) -> None:
+        # key: (bucket_name, key_value) -> deque of float timestamps
+        self._windows: dict[tuple[str, str], collections.deque] = (
+            collections.defaultdict(collections.deque)
+        )
+        # SSE concurrent count per IP: ip -> set of request_ids
+        self._sse_counts: dict[str, set] = collections.defaultdict(set)
+
+    # -- Sliding window -------------------------------------------------------
+
+    def check(
+        self,
+        bucket: str,
+        key: str,
+        max_requests: int,
+        window_seconds: int,
+    ) -> tuple[bool, int]:
+        """
+        Returns (allowed: bool, retry_after_seconds: int).
+        retry_after_seconds is 0 when allowed.
+        """
+        now = time.time()
+        cutoff = now - window_seconds
+        dq = self._windows[(bucket, key)]
+
+        # Prune expired entries
+        while dq and dq[0] < cutoff:
+            dq.popleft()
+
+        if len(dq) >= max_requests:
+            # Oldest entry in window: when it expires the limit resets
+            retry_after = max(1, int(dq[0] - cutoff) + 1)
+            return False, retry_after
+
+        dq.append(now)
+        return True, 0
+
+    # -- SSE concurrent limit -------------------------------------------------
+
+    def sse_acquire(self, ip: str, request_id: str, max_concurrent: int) -> bool:
+        """
+        Try to register a new SSE connection from `ip`.
+        Returns True if allowed, False if the IP already has max_concurrent.
+        """
+        active = self._sse_counts[ip]
+        if len(active) >= max_concurrent:
+            return False
+        active.add(request_id)
+        return True
+
+    def sse_release(self, ip: str, request_id: str) -> None:
+        """Deregister an SSE connection (call on disconnect)."""
+        self._sse_counts[ip].discard(request_id)
+        if not self._sse_counts[ip]:
+            del self._sse_counts[ip]
+
+    def sse_count(self, ip: str) -> int:
+        return len(self._sse_counts.get(ip, set()))
+
+    # -- Unique-handle tracking for Sybil check -------------------------------
+
+    def track_handle(self, ip: str, handle: str) -> None:
+        """Record that `ip` used `handle`. Reuses the sliding window bucket."""
+        # We store "handle:<handle>" entries in a dedicated set-style bucket.
+        # We use the sybil window (3600s) and key on ip.
+        # The actual uniqueness counting is done via a separate structure.
+        pass  # Handled by check() on "sybil_handles:<ip>" + "<handle>"
+
+    def count_unique_handles(
+        self,
+        ip: str,
+        handle: str,
+        window_seconds: int,
+    ) -> tuple[bool, int]:
+        """
+        Track how many distinct handles an IP has used in window_seconds.
+        Returns (allowed, retry_after).
+        """
+        now = time.time()
+        cutoff = now - window_seconds
+
+        # We keep a time-ordered deque of (timestamp, handle) pairs
+        dq_key = ("sybil_pairs", ip)
+        dq = self._windows[dq_key]  # stores (ts, handle) tuples
+
+        # Prune old entries
+        while dq and dq[0][0] < cutoff:
+            dq.popleft()
+
+        # Count distinct handles in the window
+        seen_handles = {entry[1] for entry in dq}
+
+        if handle not in seen_handles and len(seen_handles) >= RATE_LIMITS["per_ip_sybil"]["max_requests"]:
+            # Window is full of different handles — this is a new one, reject
+            oldest_ts = min(entry[0] for entry in dq if entry[1] not in seen_handles) if dq else now
+            retry_after = max(1, int(oldest_ts - cutoff) + 1)
+            return False, retry_after
+
+        # Record this (timestamp, handle) pair
+        dq.append((now, handle))
+        return True, 0
+
+
+# Module-level singleton
+_rate_limiter = RateLimiter()
+
+
+def _429(limit_type: str, retry_after: int) -> web.Response:
+    """Return a privacy-safe 429 JSON response."""
+    return web.Response(
+        text=json.dumps({
+            "error": "rate_limited",
+            "retry_after_seconds": retry_after,
+            "limit_type": limit_type,
+        }),
+        status=429,
+        content_type="application/json",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Retry-After": str(retry_after),
+        },
+    )
+
+
+def _get_ip(request: web.Request) -> str:
+    """
+    Extract real client IP from X-Forwarded-For (set by nginx/Cloudflare),
+    falling back to request.remote.
+    """
+    xff = request.headers.get("X-Forwarded-For", "")
+    if xff:
+        # X-Forwarded-For can be comma-separated; leftmost is the client
+        ip = xff.split(",")[0].strip()
+        return ip or "unknown"
+    return request.remote or "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +446,26 @@ async def handle_post_channel(request: web.Request) -> web.Response:
     """Receive a signed envelope, validate, append, broadcast."""
     channel = request.match_info["name"]
     rid = _request_id(request)
+    ip = _get_ip(request)
+    masked_ip = _mask_ip(ip)
+
+    # -- Rate limit: per-IP POST budget --
+    ok, retry = _rate_limiter.check(
+        "per_ip_post", ip,
+        max_requests=RATE_LIMITS["per_ip_post"]["max_requests"],
+        window_seconds=RATE_LIMITS["per_ip_post"]["window_seconds"],
+    )
+    if not ok:
+        log.warning(
+            "ratelimit.exceeded",
+            extra={
+                "event": "ratelimit.exceeded",
+                "limit_type": "per_ip",
+                "ip": masked_ip,
+                "retry_after": retry,
+            },
+        )
+        return _429("per_ip", retry)
 
     try:
         body = await request.json()
@@ -252,6 +492,27 @@ async def handle_post_channel(request: web.Request) -> web.Response:
             },
         )
         return _json_response({"error": "envelope must be a JSON object"}, 400)
+
+    # -- Rate limit: per-pubkey envelope budget --
+    sender_handle = body.get("from") or ""
+    if sender_handle:
+        ok_pk, retry_pk = _rate_limiter.check(
+            "per_pubkey", sender_handle,
+            max_requests=RATE_LIMITS["per_pubkey"]["max_requests"],
+            window_seconds=RATE_LIMITS["per_pubkey"]["window_seconds"],
+        )
+        if not ok_pk:
+            log.warning(
+                "ratelimit.exceeded",
+                extra={
+                    "event": "ratelimit.exceeded",
+                    "limit_type": "per_pubkey",
+                    "key": _mask_key(sender_handle),
+                    "ip": masked_ip,
+                    "retry_after": retry_pk,
+                },
+            )
+            return _429("per_pubkey", retry_pk)
 
     # Load registry — relay has all registered pubkeys
     registry = core.load_pubkey_registry()

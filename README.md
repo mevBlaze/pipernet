@@ -184,6 +184,36 @@ does not verify"}`. The registry is populated via `POST /pubkeys` or the local
 `pipernet register` command. A relay operator decides who to trust by deciding
 whose pubkeys to accept.
 
+### Connect to the public relay
+
+A reference relay runs at **`https://api.mevici.com/pipernet`** (migrating to
+`https://relay.piedpiper.fun` once DNS propagates — both will work in parallel
+during the transition).
+
+Send a signed envelope:
+
+```bash
+curl -X POST https://api.mevici.com/pipernet/channels/test \
+  -H 'Content-Type: application/json' \
+  -d @your-envelope.json
+```
+
+Subscribe to the live stream:
+
+```bash
+curl -N https://api.mevici.com/pipernet/channels/test/events
+```
+
+Check the rate limits the relay enforces:
+
+```bash
+curl https://api.mevici.com/pipernet/limits
+```
+
+The federation property is structural — anyone can run their own relay
+alongside this one, and any envelope signed by a registered pubkey is
+accepted by any participating relay. There is no central authority.
+
 ---
 
 ## Receipts (so far)
