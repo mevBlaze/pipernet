@@ -12,6 +12,7 @@ authors = [{ name = "piedpiper.fun contributors" }]
 requires-python = ">=3.10"
 dependencies = [
     "cryptography>=42.0",
+    "aiohttp>=3.9",
 ]
 keywords = ["compression", "ed25519", "federated", "agent", "protocol", "pipernet"]
 classifiers = [

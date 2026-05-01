@@ -64,9 +64,89 @@ append-only JSONL at `~/.pipernet/channels/<channel>.jsonl`. Source: `cli/`.
 Spec it implements: [`spec/04-channel-room.md`](spec/04-channel-room.md) +
 [`spec/05-identity.md`](spec/05-identity.md).
 
-What's *not* yet shipped: peer networking. Today the client signs and verifies
-locally; you transport envelopes to peers via Tier-A side channels (file
-transfer, scp, AirDrop). Networking is the next milestone — see `ROADMAP.md`.
+---
+
+## Run a relay
+
+One command starts an HTTP relay any node on your LAN can connect to:
+
+```bash
+pipernet serve --port 8000 --host 0.0.0.0
+```
+
+That's it. The relay:
+- validates every envelope's Ed25519 signature before appending
+- streams new envelopes to subscribers in real time (SSE)
+- stores channels as append-only JSONL at `~/.pipernet/channels/`
+- persists across restarts
+
+### Two-machine demo (alice runs the relay, bob connects)
+
+**Machine A (alice):**
+```bash
+pip install pipernet
+pipernet keygen --handle alice
+pipernet serve --port 8000
+# → relay listening on 0.0.0.0:8000
+```
+
+**Machine B (bob):**
+```bash
+pip install pipernet
+pipernet keygen --handle bob
+
+# Register bob's pubkey on alice's relay (one-time)
+BOB_PK=$(python3 -c "from cli import core; print(core.load_pubkey_registry()['bob'])")
+curl -X POST http://ALICE_IP:8000/pubkeys \
+     -H 'Content-Type: application/json' \
+     -d "{\"handle\": \"bob\", \"pubkey_hex\": \"$BOB_PK\"}"
+
+# Also register alice's pubkey on the relay (alice does this locally or via CLI)
+# Alice runs: pipernet register --handle alice --pubkey <alice_pubkey_hex>
+# (already registered after keygen)
+
+# Bob subscribes to live events:
+curl -N http://ALICE_IP:8000/channels/room/events &
+
+# Bob posts a signed message to alice's relay:
+pipernet send --handle bob --channel room --body "hello from bob" | \
+  curl -X POST http://ALICE_IP:8000/channels/room \
+       -H 'Content-Type: application/json' -d @-
+```
+
+**Alice sees it arrive instantly** — no polling, no AirDrop, no paste.
+
+```bash
+# Alice reads the channel:
+curl http://localhost:8000/channels/room
+
+# Or subscribes to live feed:
+curl -N http://localhost:8000/channels/room/events
+```
+
+### All endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/channels/<name>` | Submit a signed envelope |
+| `GET`  | `/channels/<name>` | Read full channel (JSON array) |
+| `GET`  | `/channels/<name>?format=jsonl` | Raw JSONL |
+| `GET`  | `/channels/<name>/events` | SSE — live envelope stream |
+| `GET`  | `/pubkeys` | Pubkey registry |
+| `POST` | `/pubkeys` | Register a peer pubkey |
+| `POST` | `/gossip` | Relay-to-relay envelope sync |
+| `GET`  | `/health` | Node stats (uptime, channels, peers, SSE clients) |
+| `GET`  | `/` | Quickstart help text |
+
+### Trust model
+
+No auth tokens. No accounts. The cryptography is the auth.
+
+Every `POST /channels/<name>` call is validated against the pubkey registry. An
+envelope with an invalid or unregistered signature gets `400 {"error": "signature
+does not verify"}`. The registry is populated via `POST /pubkeys` or the local
+`pipernet register` command. A relay operator decides who to trust by deciding
+whose pubkeys to accept.
 
 ---
 
@@ -211,12 +291,14 @@ Reference docs in `spec/`. Reproducible everything.
 | Compression baseline (order-3 Markov + arith coding) | ✅ shipped |
 | Compression v0.3 (4-window match, multiplicative mix) | ✅ shipped, +38.73% on 100 KB |
 | CLI client (keygen, send, verify, inbox, register, whoami) | ✅ shipped, schema v2.0 |
+| HTTP relay (`pipernet serve`) | ✅ shipped — POST/GET channels, SSE, pubkey registry, gossip |
 | `envelope.py` atom | 🟡 design + py reference (integration pending) |
 | 9-state lifecycle FSM | 🟡 design + py reference |
 | Channel `room` v1.0 schema | ✅ locked, reference in `mesh/` |
 | Ed25519 + Merkle chain | ✅ shipped (CLI uses it end-to-end) |
 | Three-layer transport (Grace/FNP/DOTpost) | 🟡 design; reference impl partial |
-| Peer networking (WebRTC) | 🟡 next milestone |
+| Peer networking (HTTP relay + SSE) | ✅ shipped — `pipernet serve` |
+| Peer networking (WebRTC) | 🟡 next milestone (browser P2P) |
 | Live room demo (openpiper.vercel.app) | 🟡 in progress |
 | Defensive trademark filings | 🟡 planned (foundation pending) |
 | Hutter Prize submission | 🟡 architecture is in scope; full enwik8 run is the next milestone |
@@ -231,9 +313,11 @@ marketing and the proof.
 
 **What's next, in order:**
 
-1. **Peer networking** — WebRTC transport so two nodes can exchange envelopes
-   without a file handoff. The CLI flow becomes `pipernet send` → propagates
-   automatically to everyone on the channel. This is the next milestone.
+1. **Peer networking (HTTP relay)** — ✅ shipped. `pipernet serve` starts an HTTP
+   relay; any node can POST signed envelopes and subscribe to live SSE streams.
+   No file handoff. No AirDrop. Signatures are the auth.
+
+2. **Peer networking (WebRTC)** — browser P2P without a relay. Next milestone.
 
 2. **Live room demo** — `openpiper.vercel.app` — a minimal browser UI where
    you can join a channel and watch (and send) live signed messages. No

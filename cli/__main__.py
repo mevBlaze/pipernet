@@ -8,6 +8,7 @@ Usage:
     pipernet inbox --channel <ch>
     pipernet register --handle <name> --pubkey <hex>
     pipernet whoami --handle <name>
+    pipernet serve [--host HOST] [--port PORT] [--node HANDLE]
 """
 from __future__ import annotations
 
@@ -119,6 +120,12 @@ def cmd_register(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    from .server import run_server
+    run_server(host=args.host, port=args.port, node_handle=args.node)
+    return 0
+
+
 def cmd_whoami(args: argparse.Namespace) -> int:
     reg = core.load_pubkey_registry()
     pk = reg.get(args.handle)
@@ -172,6 +179,12 @@ def main(argv: list[str] | None = None) -> int:
     p_who = sub.add_parser("whoami", help="show identity for a handle")
     p_who.add_argument("--handle", required=True)
     p_who.set_defaults(func=cmd_whoami)
+
+    p_serve = sub.add_parser("serve", help="start an HTTP relay node (aiohttp)")
+    p_serve.add_argument("--host", default="0.0.0.0", help="bind host (default: 0.0.0.0)")
+    p_serve.add_argument("--port", type=int, default=8000, help="bind port (default: 8000)")
+    p_serve.add_argument("--node", default=None, help="node handle to advertise (default: first registered key)")
+    p_serve.set_defaults(func=cmd_serve)
 
     args = p.parse_args(argv)
     return args.func(args)

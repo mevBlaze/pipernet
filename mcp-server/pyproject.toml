@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pipernet-mcp"
+version = "0.1.0"
+description = "MCP server for Pipernet — signing primitives + Oracle knowledge gateway"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "piedpiper.fun contributors" }]
+requires-python = ">=3.10"
+dependencies = [
+    # Anthropic's official MCP SDK (Streamable HTTP transport)
+    "mcp>=1.0.0",
+    # Async HTTP client for Oracle V4 proxy
+    "aiohttp>=3.9",
+    # Inherited from parent pipernet package
+    "cryptography>=42.0",
+]
+keywords = ["mcp", "pipernet", "ed25519", "identity", "oracle", "agent"]
+
+[project.scripts]
+pipernet-mcp = "mcp_server.main:main"
+
+[tool.setuptools]
+packages = ["mcp_server"]
+
+[tool.setuptools.package-dir]
+"mcp_server" = "."
