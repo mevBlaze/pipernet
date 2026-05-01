@@ -1,0 +1,4 @@
+{"type":"summary","sessionId":"test-session-abc12345","timestamp":"2026-04-30T00:00:00Z"}
+{"message":{"role":"user","content":"We need to finalise the DOT schema for the room channel."},"timestamp":"2026-04-30T10:00:00Z"}
+{"message":{"role":"assistant","content":"Agreed. Schema v2.0 locked at R88. Six required fields: from, sequence, parent, body, signature, timestamp. No addressed_to, no thread — those are derived."},"timestamp":"2026-04-30T10:00:05Z"}
+{"message":{"role":"user","content":"Ship it. Add to spec/04-channel-room.md and we're done."},"timestamp":"2026-04-30T10:01:00Z"}
