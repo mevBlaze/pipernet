@@ -37,6 +37,7 @@ import asyncio
 import collections
 import json
 import logging
+import os
 import sys
 import time
 import uuid
@@ -380,6 +381,70 @@ def _cors_headers() -> dict[str, str]:
     }
 
 
+def _normalise_open_payload(body: dict, channel: str) -> dict:
+    """Normalise an open-channel payload into a stable schema-v2-shaped record.
+
+    Open-mode channels (e.g. holders demo) skip Ed25519 verification but still
+    need a consistent on-disk shape so history + SSE work uniformly. We accept
+    whatever the client sends and project it into:
+
+        from        — handle (string)  [defaults to 'anon-XXXX' if missing]
+        channel     — channel name
+        sequence    — int (epoch ms if not provided)
+        parent      — null
+        modes       — ["open"]
+        body        — [["txt", text]]
+        timestamp   — ISO 8601 string
+        signature   — null  (open mode)
+        wallet      — original wallet pubkey if the client supplied one
+        meta        — original raw payload (for debugging)
+    """
+    from datetime import datetime, timezone
+
+    text = body.get("content") or body.get("body") or body.get("text") or ""
+    if isinstance(text, list):
+        for entry in text:
+            if isinstance(entry, list) and len(entry) >= 2 and entry[0] == "txt":
+                text = entry[1]
+                break
+        else:
+            text = json.dumps(text)
+    text = str(text)[:2000]
+
+    handle = (
+        body.get("handle")
+        or body.get("from")
+        or body.get("author")
+        or "anon"
+    )
+    handle = str(handle)[:64]
+
+    ts_in = body.get("timestamp") or body.get("createdAt") or body.get("ts")
+    if isinstance(ts_in, (int, float)):
+        ts_iso = datetime.fromtimestamp(ts_in / 1000.0, tz=timezone.utc).isoformat()
+    elif isinstance(ts_in, str):
+        ts_iso = ts_in
+    else:
+        ts_iso = datetime.now(timezone.utc).isoformat()
+
+    seq = body.get("sequence")
+    if not isinstance(seq, int):
+        seq = int(time.time() * 1000)
+
+    return {
+        "from": handle,
+        "channel": channel,
+        "sequence": seq,
+        "parent": None,
+        "modes": ["open"],
+        "body": [["txt", text]],
+        "timestamp": ts_iso,
+        "signature": None,
+        "wallet": body.get("author") or body.get("wallet"),
+        "meta": {"open_mode": True, "original_keys": sorted(body.keys())},
+    }
+
+
 def _json_response(data: Any, status: int = 200) -> web.Response:
     return web.Response(
         text=json.dumps(data, indent=2),
@@ -514,27 +579,47 @@ async def handle_post_channel(request: web.Request) -> web.Response:
             )
             return _429("per_pubkey", retry_pk)
 
-    # Load registry — relay has all registered pubkeys
-    registry = core.load_pubkey_registry()
-    verdict = core.verify_envelope(body, registry=registry)
-    if not verdict["valid"]:
-        log.warning(
-            "envelope.rejected",
-            extra={
-                "event": "envelope.rejected",
-                "request_id": rid,
-                "channel": channel,
-                "from": body.get("from"),
-                "reason": verdict["reason"],
-            },
-        )
-        return _json_response(
-            {"error": "signature does not verify", "reason": verdict["reason"]},
-            400,
-        )
+    # Open-channel allowlist — channels in this set accept envelopes without
+    # Ed25519 signature verification. The wallet-token gate on the client side
+    # is the authentication for these channels; v0 demo mode for the holder
+    # chat. Production v1 will move 'holders' off this list once client-side
+    # ephemeral-keypair signing ships. Configurable via PIPERNET_OPEN_CHANNELS
+    # env var (comma-separated).
+    OPEN_CHANNELS = {
+        c.strip()
+        for c in (os.environ.get("PIPERNET_OPEN_CHANNELS", "holders") or "").split(",")
+        if c.strip()
+    }
 
-    # Append to channel
-    core.append_to_channel(channel, body)
+    if channel in OPEN_CHANNELS:
+        # Open mode: skip signature verification, but still require minimal
+        # envelope shape. Normalise payload into a schema-v2-shaped record
+        # so storage + history + SSE all work consistently.
+        normalised = _normalise_open_payload(body, channel)
+        core.append_to_channel(channel, normalised)
+        body = normalised  # for downstream broadcast
+    else:
+        # Strict mode: signature must verify against the registry.
+        registry = core.load_pubkey_registry()
+        verdict = core.verify_envelope(body, registry=registry)
+        if not verdict["valid"]:
+            log.warning(
+                "envelope.rejected",
+                extra={
+                    "event": "envelope.rejected",
+                    "request_id": rid,
+                    "channel": channel,
+                    "from": body.get("from"),
+                    "reason": verdict["reason"],
+                },
+            )
+            return _json_response(
+                {"error": "signature does not verify", "reason": verdict["reason"]},
+                400,
+            )
+
+        # Append to channel
+        core.append_to_channel(channel, body)
     log.info(
         "envelope.appended",
         extra={
