@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "piperbot"
+version = "0.1.0"
+description = "Piperbot — Telegram ↔ Pipernet bridge bot"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "piedpiper.fun contributors" }]
+requires-python = ">=3.10"
+dependencies = [
+    # Telegram bot framework (async, modern)
+    "python-telegram-bot>=22.0",
+    # HTTP client for GitHub stats endpoint
+    "aiohttp>=3.9",
+    # Ed25519 signing (shared with pipernet parent)
+    "cryptography>=42.0",
+]
+
+[project.optional-dependencies]
+dot = [
+    # Required for /dot and /scan commands
+    "qrcode[pil]>=7.0",
+    "Pillow>=10.0",
+    "pyzbar>=0.1.9",
+]
+
+[project.urls]
+Homepage = "https://piedpiper.fun"
+Repository = "https://github.com/dot-protocol/pipernet"

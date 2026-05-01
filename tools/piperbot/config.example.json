@@ -1,0 +1,9 @@
+{
+  "_comment": "Copy this to ~/.pipernet/piperbot.json and fill in the values.",
+  "_note": "All values can be overridden by environment variables — see README.",
+
+  "telegram_bot_token": "<paste BotFather token here — NEVER commit this file>",
+  "group_chat_id": "<negative number — your Telegram group's chat_id>",
+  "bridge_channel": "telegram-bridge",
+  "github_repo": "dot-protocol/pipernet"
+}

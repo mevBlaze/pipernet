@@ -180,6 +180,24 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_bot(args: argparse.Namespace) -> int:
+    """Start piperbot — the Telegram ↔ Pipernet bridge bot."""
+    from pathlib import Path as _Path
+    import importlib.util as _util
+
+    here = _Path(__file__).resolve().parent.parent
+    spec = _util.spec_from_file_location(
+        "piperbot_main",
+        here / "tools" / "piperbot" / "main.py",
+    )
+    mod = _util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    config_path = _Path(args.config) if args.config else None
+    mod.run(config_path=config_path, dry=args.dry_run, debug=args.debug)
+    return 0
+
+
 def cmd_whoami(args: argparse.Namespace) -> int:
     reg = core.load_pubkey_registry()
     pk = reg.get(args.handle)
@@ -253,6 +271,25 @@ def main(argv: list[str] | None = None) -> int:
     p_dot_scan = dot_sub.add_parser("scan", help="scan and verify a .dot.png")
     p_dot_scan.add_argument("image", help="path to .dot.png file")
     p_dot_scan.set_defaults(func=cmd_dot)
+
+    # bot — Telegram ↔ Pipernet bridge
+    p_bot = sub.add_parser("bot", help="start piperbot (Telegram ↔ Pipernet bridge)")
+    p_bot.add_argument(
+        "--config",
+        default=None,
+        help="path to piperbot.json config (default: ~/.pipernet/piperbot.json)",
+    )
+    p_bot.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="simulate message handling without connecting to Telegram (useful for CI)",
+    )
+    p_bot.add_argument(
+        "--debug",
+        action="store_true",
+        help="enable verbose debug logging",
+    )
+    p_bot.set_defaults(func=cmd_bot)
 
     args = p.parse_args(argv)
     return args.func(args)
